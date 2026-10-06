@@ -11,6 +11,38 @@ replace the init system entirely.
 
 ---
 
+## Tested configuration
+
+Everything below was actually built and booted, not assumed. If you are
+returning to this after a while, these are the versions that are known to
+work together.
+
+| Component | Version |
+|---|---|
+| Yocto release | **scarthgap (5.0)** |
+| poky | `yocto-5.0.20-106-gcbd62bb2a9` — commit `cbd62bb2a9f2ab3466a0f72f4289bc86ca20a019` |
+| bitbake | 2.8.1 |
+| meta-openembedded (`meta-oe`, `meta-python`) | `scarthgap` — `0f00f8b9a21950640da8c5707343e5540133f86e` |
+| meta-qt6 | branch `6.7` — `416a83c4c4cedde4503239fff0079a66d8aacc16` (Qt **6.7.3**) |
+| meta-raspberrypi | `scarthgap` — `6ca1f75017cc5d5acdb8bb05634c4bc01fa049fd` |
+
+| Target | |
+|---|---|
+| Machine | `raspberrypi3-64` (aarch64, cortexa53) |
+| Distro | `swiftboot` |
+| Kernel | linux-raspberrypi 6.6.63 |
+| Hardware | Raspberry Pi 3 Model B, booted from SD |
+
+**Build host used:** Ubuntu 26.04 under WSL2 — note that scarthgap is only
+*validated* up to Ubuntu 24.04. It does build on newer hosts, but expect
+breakage from the host toolchain and Python running ahead of what the release
+supports. `meta-swiftboot/recipes-qt/qt6/qtshadertools_git.bbappend` exists
+because of exactly that. If you hit more such failures, use
+`poky/scripts/install-buildtools` for a known-good self-contained toolchain
+rather than patching them one by one.
+
+---
+
 ## Repository layout
 
 | Directory | What it is |
@@ -30,7 +62,7 @@ To build a different product on swiftboot, add your own layer next to
 
 ## Quick start (Raspberry Pi 3, 64-bit)
 
-Clone the dependencies alongside this repo, all on `scarthgap`:
+Clone the dependencies alongside this repo:
 
 ```bash
 git clone -b scarthgap https://git.yoctoproject.org/poky
@@ -39,7 +71,8 @@ git clone -b 6.7        https://code.qt.io/yocto/meta-qt6
 git clone -b scarthgap https://github.com/agherzan/meta-raspberrypi
 ```
 
-Then:
+To reproduce the exact tested build, check each out at the commit in the table
+above rather than taking branch tips.
 
 ```bash
 source poky/oe-init-build-env build
@@ -73,6 +106,14 @@ Output:
 
 Flash with Raspberry Pi Imager, balenaEtcher, or
 `bmaptool copy <image.wic.bz2> /dev/sdX`.
+
+### Build host resources
+
+Qt 6 plus a kernel is a heavy build. On a memory-constrained machine, lower
+concurrency rather than anything else — `BB_NUMBER_THREADS x PARALLEL_MAKE` is
+the number of compilers running at once, and that is what drives peak usage.
+Both variables are excluded from task hashes, so changing them costs no sstate.
+Budget roughly 100 GB of disk.
 
 ---
 
