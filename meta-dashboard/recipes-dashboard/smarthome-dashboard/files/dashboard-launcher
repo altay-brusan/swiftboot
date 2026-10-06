@@ -1,0 +1,71 @@
+#!/bin/sh
+# PID 1 replacement: boot straight into the dashboard, no init system.
+#
+# Selected with init=/usr/bin/dashboard-launcher on the kernel cmdline. The
+# kernel execs exactly one program as PID 1 and does not care which, so this
+# replaces sysvinit entirely - no runlevels, no rcS.d/rc5.d (~26 shell scripts,
+# measured at ~7s under TCG), no getty.
+#
+# PID 1 has two hard obligations:
+#   1. Never exit - if PID 1 dies the kernel panics.
+#   2. Reap orphaned children.
+# Hence the supervision loop at the bottom rather than a bare exec.
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+say() { echo "[launcher] $*" > /dev/console 2>/dev/null; }
+
+# devtmpfs is mounted by the kernel itself, so /dev is already populated -
+# this is why udev is not needed here. The rest we must do ourselves.
+mount -t proc  proc  /proc 2>/dev/null
+mount -t sysfs sysfs /sys  2>/dev/null
+mount -t tmpfs tmpfs /run  2>/dev/null
+mount -t tmpfs tmpfs /tmp  2>/dev/null
+
+# The rootfs is read-only by design (power-loss resilience), so every path Qt
+# writes to has to live on tmpfs. sysvinit's populate-volatile.sh normally does
+# this; we do only the part that matters.
+[ -d /var/volatile ] && mount -t tmpfs tmpfs /var/volatile 2>/dev/null
+mkdir -p /var/volatile/log /var/volatile/tmp 2>/dev/null
+
+RUNDIR=/run/user/0
+export XDG_RUNTIME_DIR="$RUNDIR"
+export XDG_CACHE_HOME="$RUNDIR/cache"
+export XDG_CONFIG_HOME="$RUNDIR/config"
+export HOME=/home/root
+export QT_QPA_PLATFORM=eglfs
+export QT_QPA_EGLFS_INTEGRATION=eglfs_kms
+export QT_QPA_EGLFS_ALWAYS_SET_MODE=1
+export QT_QPA_EGLFS_HIDECURSOR=1
+mkdir -p "$RUNDIR" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" 2>/dev/null
+chmod 0700 "$RUNDIR" 2>/dev/null
+
+# Measured: DRM comes up ~4s before userspace starts, so this should never
+# actually wait. Kept because the cost when the device is present is one stat.
+i=0
+while [ ! -e /dev/dri/card0 ]; do
+    i=$((i + 1))
+    [ "$i" -gt 50 ] && { say "WARNING: /dev/dri/card0 absent, starting anyway"; break; }
+    sleep 0.1 2>/dev/null || sleep 1
+done
+
+say "starting dashboard"
+
+# Supervision loop. A bare `exec` would make the app itself PID 1, and any
+# crash would then panic the kernel. Three consecutive failures drops to a
+# shell so the device is debuggable rather than bricked.
+fails=0
+while true; do
+    /usr/bin/appSmartDashboard
+    rc=$?
+    fails=$((fails + 1))
+    say "dashboard exited rc=$rc (consecutive failures: $fails)"
+
+    if [ "$fails" -ge 3 ]; then
+        say "3 consecutive failures - dropping to a rescue shell"
+        /bin/sh < /dev/console > /dev/console 2>&1
+        fails=0
+    fi
+    sleep 1
+done

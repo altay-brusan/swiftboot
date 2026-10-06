@@ -1,0 +1,8 @@
+tmp/
+build/
+sstate-cache/
+downloads/
+*.pyc
+__pycache__/
+*.swp
+*~
